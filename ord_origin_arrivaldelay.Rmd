@@ -1,0 +1,250 @@
+---
+title: "final_project"
+author: "Maggie Chen"
+date: "2023-02-12"
+output: html_document
+---
+
+```{r}
+library(tseries)
+library(forecast)
+library(dplyr)
+library(reshape2)
+library(tidyverse)
+library(tidyr)
+```
+
+We have flight data to and from ORD to LAX from 2013 to 2022. 
+Cancellation Codes: 
+A: carrier
+B: weather
+C: national air system
+D: security
+
+
+#### Read ORD origin and LAX origin files
+1. read the file and convert NA to 0
+```{r}
+setwd("/Users/eujeneyum/Desktop/UChicago_Courses/Q5/time_series/final_project/")
+ord_flights <- read.csv('ord_origin_master.csv')
+ord_flights[is.na(ord_flights)] <- 0
+ord_flights[ord_flights == ""] <- "N/A"
+lax_flights <- read.csv('lax_origin_master.csv')
+lax_flights[is.na(lax_flights)] <- 0
+lax_flights[lax_flights == ""] <- "N/A"
+```
+
+
+
+```{r}
+ord_flights <- ord_flights %>% mutate(row_id = row_number())
+ord_flights <- ord_flights %>% pivot_wider(names_from = CANCELLATION_CODE, values_from = FLIGHTS, values_fn = length)
+ord_flights [is.na(ord_flights)] <- 0
+ord_flights <- select(ord_flights, -c("N/A"))
+```
+
+
+```{r}
+lax_flights <- lax_flights %>% mutate(row_id = row_number())
+lax_flights <- lax_flights %>% pivot_wider(names_from = CANCELLATION_CODE, values_from = FLIGHTS, values_fn = length)
+lax_flights [is.na(lax_flights)] <- 0
+lax_flights <- select(lax_flights, -c("N/A"))
+```
+
+
+```{r}
+
+```
+
+
+2.1 aggregate the dataset for ORD & LAX
+```{r}
+df_ord = ord_flights %>% 
+                  group_by(FL_DATE, OP_UNIQUE_CARRIER) %>%
+                  summarize(
+                    arr_tot_delay = sum(ARR_DELAY_NEW),
+                    arr_num_delay = length(ARR_DELAY_NEW),
+                    arr_avg_delay = mean(ARR_DELAY_NEW),
+                    cancel_A = sum(A),
+                    cancel_B = sum(B),
+                    cancel_C = sum(C),
+                    cancel_D = sum(D),
+                    delay_weather = sum(WEATHER_DELAY),
+                    delay_carrier = sum(CARRIER_DELAY),
+                    delay_nas = sum(NAS_DELAY),
+                    delay_security = sum(SECURITY_DELAY),
+                    delay_late_aircraft = sum(LATE_AIRCRAFT_DELAY)
+                  )
+
+```
+```{r}
+df_lax = ord_flights %>% 
+                  group_by(FL_DATE, OP_UNIQUE_CARRIER) %>%
+                  summarize(
+                    arr_tot_delay = sum(ARR_DELAY_NEW),
+                    arr_num_delay = length(ARR_DELAY_NEW),
+                    arr_avg_delay = mean(ARR_DELAY_NEW),
+                    cancel_A = sum(A),
+                    cancel_B = sum(B),
+                    cancel_C = sum(C),
+                    cancel_D = sum(D)
+                  )
+```
+
+
+```{r}
+df_lax = lax_flights %>%
+                  group_by(FL_DATE) %>%
+                  summarize(
+                    lax_arr_tot_delay = sum(ARR_DELAY_NEW),
+                    lax_arr_num_delay = length(ARR_DELAY_NEW),
+                    lax_arr_avg_delay = mean(ARR_DELAY_NEW)
+                  )
+```
+
+```{r}
+df = left_join(df_ord, df_lax, by=c("FL_DATE"))
+```
+
+2.2 convert to ts object and plot
+```{r}
+ord_arr_ts <- ts(ord_arr_delay$x, start = c(2013, 1), frequency = 365)
+tsdisplay(ord_arr_ts)
+```
+3.1 aggregate the sum of ARR_DELAY_NEW based on months
+```{r}
+ord_flights$month <- format(as.Date(ord_flights$DATE, format="%d/%m/%Y"),"%m")
+ord_arr_delay <- aggregate(ARR_DELAY_NEW ~ month + YEAR, ord_flights, FUN = sum )
+```
+
+3.2 convert to ts object and plot
+```{r}
+ord_arr_ts <- ts(ord_arr_delay$ARR_DELAY_NEW, start = c(2013, 1), frequency = 12)
+tsdisplay(ord_arr_ts)
+```
+questions:
+1. how to aggregate - sum or avg for a single day?
+2. the scope - do we want to narrow down to one way & maybe a single airline?
+3. frequency of ts object - do we want to do daily or monthly?
+
+
+
+#### TESTING WITH JUST SMALL DATA
+BRING IN DATA
+```{r}
+flights <- read.csv('flight_delays_2015_LAX_ORD_NDLAX.csv')
+flights[is.na(flights)] <- 0
+flights[flights == ""] <- "N/A"
+```
+
+
+```{r}
+flights$flights_uid = paste0(flights$FL_DATE, "_", flights$OP_CARRIER_FL_NUM, "_", flights$OP_UNIQUE_CARRIER)
+flights <- distinct(flights, flights_uid, .keep_all = TRUE)
+```
+
+
+CREATE HOUR COLUMN
+```{r}
+flights <- flights %>%
+  mutate(
+    HOUR = substr(as.character(CRS_ARR_TIME),1,nchar(as.character(CRS_ARR_TIME))-2)
+    )
+```
+
+
+```{r}
+flights$HOUR[flights$HOUR == ""] <- '0'
+flights = flights %>% 
+                mutate(
+                  HOUR = if_else(nchar(HOUR) == 1, paste0('0', HOUR), HOUR))
+```
+
+
+```{r}
+flights$FLIGHTS = 1
+```
+
+
+```{r}
+flights <- flights %>% mutate(row_id = row_number())
+flights <- flights %>% pivot_wider(names_from = CANCELLATION_CODE, values_from = FLIGHTS, values_fn = length)
+flights [is.na(flights)] <- 0
+flights <- select(flights, -c("N/A"))
+```
+
+```{r}
+df = flights %>% 
+      group_by(FL_DATE, OP_UNIQUE_CARRIER, ORIGIN, HOUR) %>%
+      summarize(
+        arr_tot_delay = sum(ARR_DELAY_NEW),
+        arr_num_delay = length(ARR_DELAY_NEW),
+        arr_avg_delay = mean(ARR_DELAY_NEW),
+        dep_tot_delay = sum(DEP_DELAY_NEW),
+        dep_num_delay = length(DEP_DELAY_NEW),
+        dep_avg_delay = mean(DEP_DELAY_NEW),
+        delay_weather = sum(WEATHER_DELAY),
+        delay_carrier = sum(CARRIER_DELAY),
+        delay_nas = sum(NAS_DELAY),
+        delay_security = sum(SECURITY_DELAY),
+        delay_late_aircraft = sum(LATE_AIRCRAFT_DELAY),
+        cancel_A = sum(A),
+        cancel_B = sum(B),
+        cancel_C = sum(C)
+        #cancel_D = sum(D)
+      )
+
+# BRING BACK THE D COLUMN LATER 
+#df$HOUR = as.integer((df$HOUR))
+
+```
+
+```{r}
+df$DATE = as.Date(df$FL_DATE, format = '%m/%d/%Y')
+```
+
+```{r}
+hours = unique(flights$HOUR)
+hours = hours[order(hours)]
+ref <- expand.grid(id = unique(flights$DATE), t = hours)
+table(ref$t)
+ref$tid = paste0(ref$id, " ", ref$t)
+ref <- expand.grid(id = unique(ref$tid), t = unique(flights$OP_UNIQUE_CARRIER))
+ref = ref[order(ref$id, ref$t),]
+ref$origin = 'ORD'
+ref2 <- ref
+ref2$origin = "LAX"
+ref_final <- rbind(ref, ref2)
+colnames(ref_final) <- c('datetime','carrier', 'origin')
+
+```
+
+
+
+JOIN
+
+```{r}
+df$datetime = paste0(df$DATE, " ", df$HOUR)
+df_final = left_join(ref_final,df,by=c("datetime"="datetime","carrier"="OP_UNIQUE_CARRIER", "origin" = "ORIGIN"))
+```
+
+```{r}
+#head(df_final)
+df_final$HOUR = substr(df_final$datetime, nchar(df_final$datetime)-2, nchar(df_final$datetime))
+df_final$DATE = substr(df_final$datetime, 1, nchar(df_final$datetime)-3)
+df_final = df_final[order(df_final$DATE, df_final$HOUR),]
+df_final = select(df_final,-c(FL_DATE))
+df_final[is.na(df_final)] <- 0
+head(df_final)
+```
+
+TIME SERIES
+```{r}
+# carrier, origin
+write.csv(df_final,'aggregated_data.csv')
+```
+
+```{r}
+
+```
+

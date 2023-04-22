@@ -1,0 +1,229 @@
+---
+title: "harmonic analysis"
+author: "time series group 4"
+date: "2023-02-23"
+output: html_document
+---
+
+Since the p-value 0.1>0.05, we can accept the null hypothesis that the differenced time series is stationary, excluding the seasonality. 
+
+```{r}
+kpss.test(BoxCox(train_ord, lamo)) # is stationary 
+```
+our data is stationary
+
+
+```{r}
+BoxCox(train_ord, lamo)%>% mstl() %>% autoplot()
+```
+See that our seasonality is not sufficient
+
+#Note, this is the plot we should use, refer to the data below to label it 
+
+```{r}
+periodogram(BoxCox(train_ord, lamo),log='no',plot=TRUE,ylab="Periodogram",xlab="Frequency")
+```
+Using the periodogram, we can see which spikes are largest 
+
+We need help identifying the frequency of these spikes
+
+```{r}
+temp<-periodogram(BoxCox(train_ord, lamo),log='no',plot=FALSE,ylab="Periodogram",xlab="Frequency",xlim=c(0,0.1))
+
+frequencies=data.frame(freq=temp$freq, spec=temp$spec)
+frequencies=frequencies[order(-frequencies$spec),]
+head(frequencies,20)
+```
+The frequencies drop off after the first two. hopefully these frequencies will be sufficient 
+
+```{r}
+ggplot(frequencies, aes(x = freq, y = spec)) + 
+  geom_point() +
+  geom_vline(aes(xintercept = frequencies[1,"freq"], color = "1st"), linetype = "dashed")+
+    geom_vline(aes(xintercept = frequencies[2,"freq"], color = "2nd"), linetype = "dashed")+
+    geom_vline(aes(xintercept = frequencies[3,"freq"], color = "3rd"), linetype = "dashed")+
+    geom_vline(aes(xintercept = frequencies[4,"freq"], color = "4th"), linetype = "dashed")+
+    geom_vline(aes(xintercept = frequencies[5,"freq"], color = "5th"), linetype = "dashed")+
+  xlab("Frequency") +
+  ylab("Spectrum")+ 
+  theme(legend.position = "bottom", 
+        legend.direction = "horizontal",
+        legend.key = element_blank(),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 14, face = "bold"))
+
+```
+
+#interpret frequencies
+
+The relevant frequencies are as follows: 
+```{r}
+freq=1/frequencies[1:5,"freq"]
+freq
+```
+Surprisingly 53 is not appearing as a suggested period unil number 5
+
+We are getting 106, which is periods of 2 years, and 26 which is periods of half a year. The next frequencies had lower spectrum values: 
+6.666 (e.g 46.6 days), which is a month and a half. 
+53.33, which is one year
+160, which is three years. 
+
+
+```{r}
+train_ord %>% msts(ts.frequency=53,seasonal.periods = freq[1],start=c(2013,1)) %>% mstl(lambda=lamo)%>%autoplot()
+train_ord %>% msts(ts.frequency=53,seasonal.periods = freq[1:2],start=c(2013,1)) %>% mstl(lambda=lamo)%>%autoplot()
+
+```
+
+Using one period is sufficient, while two periods are not
+
+# evaluate various k values 
+
+```{r}
+freq2=append(freq[1:2],53)
+
+msts_2 <- train_ord%>% msts(ts.frequency=53,seasonal.periods = freq2[1:3] ,start=c(2013,1)) #freq[1:3]
+list_k1 <- c()
+list_k2 <- c()
+list_k3 <- c()
+list_lb <- c()
+list_rmse <- c()
+
+                   
+for (k1 in 1:6){
+  for (k2 in 0:(7-k1)){
+      k3=0        
+      print(c(k1,k2,k3))
+      #if k2>4
+      fit_2 <- auto.arima(msts_2, lambda='auto', xreg=fourier(msts_2,K=c(k1,k2,k3)), seasonal=FALSE)
+      list_k1 = append(list_k1,k1)
+      list_k2 = append(list_k2,k2)
+      list_k3 = append(list_k3,k3)
+      list_lb = append(list_lb,Box.test(fit_2$residuals, type='Ljung-Box', lag=53)$p.value)
+      rmse=sum((fit_2$residuals)^2)
+      list_rmse = append(list_rmse,rmse)
+    }
+  }
+
+
+
+
+results=data.frame(
+              k1=list_k1,
+              k2=list_k2,
+              lb_pval=list_lb,
+              rmse_val=list_rmse
+              )
+
+results$ss=results$lb_pval>0.05
+
+filter(results,ss)
+
+#1,1,0 is the most minimal
+
+#i like 4,0 , but 4,1 could work 
+
+```
+
+comparing strong values: 
+```{r}
+#here are the values to itterate through 
+k1_final=c(1,1,2,3)
+k2_final=c(1,5,1,1)
+
+#redo
+k1_final=c(1,2,3,4,4,4,5,6)
+k2_final=c(0,0,0,0,1,2,1,1)
+
+
+for (i in 1:8){
+  fit <- auto.arima(msts_2, lambda='auto', xreg=fourier(msts_2,K=c(k1_final[i],k2_final[i],0)), seasonal=FALSE)
+  #checkresiduals(fit)
+  #print(fit$aicc) #AICC is basically the same for all of them
+  
+  
+  fc<-forecast(fit,xreg=fourier(msts_2,K=c(k1_final[i],k2_final[i],0),53))
+  #plot(fc)
+  print("------------------------------------------------------------------------------")
+  print(paste0("Model fourier(",k1_final[i],",",k2_final[i],",0)"))
+  print(accuracy(fc$mean, test_ord))
+}
+
+#lowest AICC from the third model
+#pick c(1,0,0), c(4,1,0)
+
+```
+K=c(1,1,0) is the best because it has the lowest RMSE and AICC
+
+
+Testing it out
+```{r}
+fit_2 <- auto.arima(msts_2, lambda=lamo, xreg=fourier(msts_2,K=c(4,1,0)), seasonal=FALSE)
+checkresiduals(fit_2)
+#Arima(msts_2,order=c(1,0,0),lambda=lamo, xreg=fourier(msts_2,K=c(1,1,0)))%>%checkresiduals()
+Box.test(fit_2$residuals, type='Ljung-Box', lag=53)$p.value
+
+print(fit_2$aicc)
+
+fit_3 <- auto.arima(msts_2, lambda=lamo, xreg=fourier(msts_2,K=c(1,0,0)), seasonal=FALSE)
+checkresiduals(fit_3)
+#Arima(msts_2,order=c(1,0,0),lambda=lamo, xreg=fourier(msts_2,K=c(1,1,0)))%>%checkresiduals()
+Box.test(fit_3$residuals, type='Ljung-Box', lag=53)$p.value
+
+print(fit_3$aicc)
+```
+ARIMA(1,0,0) is sufficient
+
+```{r}
+fc_msts<-forecast(fit_2,xreg=fourier(msts_2,K=c(4,1,0),53))
+plot(fc_msts)
+accuracy(fc_msts$mean, test_ord)
+
+
+fc_msts<-forecast(fit_3,xreg=fourier(msts_2,K=c(1,0,0),53))
+plot(fc_msts)
+accuracy(fc_msts$mean, test_ord)
+
+```
+
+Also try the TBATS method 
+
+
+```{r}
+tbats_fit = tbats(train_ord )
+checkresiduals(tbats_fit)
+
+#white noise
+Box.test(tbats_fit$errors, type='Ljung-Box', lag=53)$p.value
+
+fc_tbats=forecast(tbats_fit,53)
+autoplot(fc_tbats)
+
+accuracy(fc_tbats$mean, test_ord)
+
+```
+Same box cox, yearly seasonality, and 8 week seasonality 
+Unfortunately the error is not white noise
+
+```{r}
+
+autoplot(fc_tbats)
+autoplot(fc_msts)
+
+# ggplot(ord2, aes(x))
+#   geom_line(aes(y = ARIMA_exp, color = "ARIMA Exp")) +
+#   geom_line(aes(y = ARIMA_slide, color = "ARIMA Slide")) +
+#   geom_line(aes(y = ETS_exp, color = "ETS Exp")) +
+#   geom_line(aes(y = ETS_slide, color = "ETS Slide")) +
+#   scale_color_manual(values = c("ARIMA Exp" = "blue", "ARIMA Slide" = "blue4", "ETS Exp" = "coral", "ETS Slide" = "coral4")) +
+#   xlab("iteration number") +
+#   ylab("AICc") +
+#   ggtitle("AICc by Model") +
+#   theme(plot.title = element_text(hjust = 0.5)) +
+#   theme(legend.title = element_blank(),
+#         legend.position = "bottom")
+
+```
+
+
+

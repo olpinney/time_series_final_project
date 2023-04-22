@@ -1,0 +1,91 @@
+---
+title: "Time Series Final"
+author: "Group 4"
+date: "2023-02-14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(fpp)
+library(tidyverse)
+library(tseries)
+library(ggplot2)
+library(forecast)
+
+```
+
+## R Markdown
+
+
+```{r}
+ord = read.csv("ord_origin_master.csv",na.strings = 0)
+lax = read.csv("lax_orgin_master.csv")
+
+```
+
+```{r}
+int_cols=c("DEP_DELAY_NEW","ARR_DELAY_NEW","CANCELLED","FLIGHTS","CARRIER_DELAY","WEATHER_DELAY","NAS_DELAY","SECURITY_DELAY","LATE_AIRCRAFT_DELAY")
+
+cancel_cols=c("A","B","C","D")
+
+ord_flights <- ord_flights %>% 
+  mutate_at(int_cols, ~replace_na(.,0))
+
+lax_flights <- lax_flights %>% 
+  mutate_at(int_cols, ~replace_na(.,0))
+
+ord$CANCELLATION_CODE = ifelse(ord$CANCELLATION_CODE=="","NA",ord$CANCELLATION_CODE)
+lax$CANCELLATION_CODE = ifelse(lax$CANCELLATION_CODE=="","NA",lax$CANCELLATION_CODE)
+
+
+```
+
+```{r}
+table(ord$CANCELLATION_CODE,useNA="always")
+table(ord$FLIGHTS,useNA="always")
+
+
+colnames(ord)
+head(ord)
+
+
+test=filter(ord,WEATHER_DELAY>0)
+
+test=filter(ord,OP_UNIQUE_CARRIER==AA)
+
+
+```
+
+
+
+```{r}
+ord$uid=paste0("FL_DATE","DEP_DELAY_NEW","ARR_DELAY_NEW","CARRIER_DELAY")
+
+val_count
+
+```
+
+
+```{r}
+ord %>%
+  group_by("CANCELLATION_CODE") %>%
+  mutate(row = row_number()) %>%
+  tidyr::pivot_wider(names_from = "CANCELLATION_CODE", values_from = "FLIGHTS") %>%
+  select(-row)
+```
+
+
+```{r}
+df_wide <- select(ord,c("FL_DATE","CANCELLATION_CODE","FLIGHTS")) %>% 
+  pivot_wider(names_from = CANCELLATION_CODE, values_from = FLIGHTS)
+```
+
+
+```{r}
+ord_sum = ord %>%
+  group_by("FL_DATE","DAY_OF_WEEK","OP_UNIQUE_CARRIER","CANCELLATION_CODE",)
+```
+
+
